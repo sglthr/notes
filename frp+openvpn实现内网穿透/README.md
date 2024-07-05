@@ -523,6 +523,7 @@ ps -ef | grep frp-1 | grep -v grep | awk '{print $2}' | xargs kill -9
 .\openvpn.exe --show-adapters
 
 # ----- 拓展，以下命令仅作学习记录，不用执行 -----
+# 删除虚拟网卡，如果不生效就去设备管理器删。
 .\tapctl.exe delete --name "网卡名"
 ```
 
