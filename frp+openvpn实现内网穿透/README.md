@@ -27,7 +27,7 @@
 
 
 
-选择 “云服务器ECS” ，由于我是完成后截的图，所以这里是显示已试用。然后配置好相应的参数，开通实例即可。（这里由于我点不进去了，就不截图了）
+选择 “云服务器ECS” ，由于我是完成后截的图，所以这里是显示已试用。然后配置好相应的参数，**镜像选择 centos 7** ，然后开通实例即可。（这里由于我点不进去了，就不截图了）
 
 ![image-20240703152841223](./assets/image-20240703152841223.png)
 
@@ -52,39 +52,43 @@ frp工具下载地址：https://github.com/fatedier/frp/releases
 
 
 ```shell
-# 1、将frps及frps.toml放至同一目录下
-ls
-frps  frps.toml
+# 1、将frps及frps.toml放至同一目录下，这里以/root/frp为例
+mkdir /root/frp
+cd /root/frp
 
 # 2、修改配置文件
-vim frps.toml
-
+cat > /root/frp/frps.toml << 'EOF'
 bindPort = 6060				# frp服务端进程监听端口，frp客户端通过此端口与服务端通信
 transport.tls.force = true		# 服务端将只接受 TLS 连接
 auth.token = "mytoken" 			# 鉴权密码，可自定义
+EOF
 
 # 3、启动frp服务端
-chmod +x frps
-nohup ./frps -c frps.toml >> logs 2>&1 &
+chmod +x /root/frp/frps
+nohup /root/frp/frps -c /root/frp/frps.toml >> /root/frp/logs 2>&1 &
 
-# 4、查看日志
-tail -f logs
+# 4、查看是否正常启动
+ps -ef | grep frps | grep -v grep
+cat /root/frp/frps/logs
+
+# 5、设为开机自启
+echo 'nohup /root/frp/frps -c /root/frp/frps.toml >> /root/frp/logs 2>&1 &' >> /etc/rc.local
+chmod +x /etc/rc.local
 ```
 
 
 
 ## 2、在内网服务器启动frp客户端
 
-上传frpc及frpc.toml到家里的一台Linux服务器上，该服务器后续也将作为openvpn服务器，**建议家里所有虚机都使用桥接模式，NAT模式可能会比较麻烦，暂未测试**。
+上传frpc及frpc.toml到家里的一台Linux服务器上，该服务器后续也将作为openvpn服务器，**本次实验使用的Linux服务器均为CentOS 7操作系统，建议家里所有虚机都使用桥接模式，NAT模式可能会比较麻烦，暂未测试**。
 
 ```shell
-# 1、将frpc及frpc.toml上传至同一目录下
-ls
-frpc  frpc.toml
+# 1、将frpc及frpc.toml上传至同一目录下，这里以/root/frp为例
+mkdir /root/frp
+cd /root/frp
 
 # 2、修改配置文件
-vim frpc.toml
-
+cat > /root/frp/frpc.toml << 'EOF'
 serverAddr = "8.134.xx.xx"    # 需要连接到的公网服务器IP地址
 serverPort = 6060			  # 公网服务器上的frp服务端监听的端口号
 auth.token = "mytoken" 			# 身份验证令牌，frpc要与frps一致
@@ -96,12 +100,19 @@ type = "tcp"			# 网络协议
 localIP = "127.0.0.1"	# 需要转发到的ip地址
 localPort = 22			# 本地服务端口号，这里以ssh服务的端口为例
 remotePort = 6000		# 访问公网frp服务端的6000端口时，将转发到localIP的22端口
+EOF
 
 # 3、启动frp客户端
-nohup ./frpc -c frpc.toml >> logs 2>&1 &
+chmod +x /root/frp/frpc
+nohup /root/frp/frpc -c /root/frp/frpc.toml >> /root/frp/logs 2>&1 &
 
-# 4、查看日志
+# 4、查看是否正常启动
+ps -ef | grep frpc | grep -v grep
 tail -f logs
+
+# 5、设为开机自启
+echo 'nohup /root/frp/frpc -c /root/frp/frpc.toml >> /root/frp/logs 2>&1 &' >> /etc/rc.local
+chmod +x /etc/rc.local
 ```
 
 
@@ -116,7 +127,7 @@ tail -f logs
 
 
 
-点击手动添加，配置需要放通的策略，如下图所示。
+点击手动添加，配置需要放通的策略，如下图所示，放通6060及6000端口的公网访问策略。
 
 ![image-20240703161238117](./assets/image-20240703161238117.png)
 
@@ -124,7 +135,7 @@ tail -f logs
 
 ### 3.2 测试使用ssh连接
 
-根据刚才frp客户端的配置，我们尝试连接公网服务器的6000端口，将转发到家里的内网服务器的22端口。
+根据刚才frpc客户端的配置，我们尝试连接公网服务器的6000端口，相当于连接到家里的内网服务器的22端口。
 
 如果能够登录上家里的内网服务器，则测试成功。
 
@@ -134,19 +145,20 @@ tail -f logs
 
 到这里，我们已经完成了frp内网穿透，如果你想要访问家里服务器的其他端口，可以再启动多个frpc客户端。
 
-但是如果我们想要畅通无阻的访问家里的所有服务，而不是每个端口都需要手动配置代理，可以参考下面的openvpn部署。
+但是如果我们想要畅通无阻的访问家里的所有服务，而不是每个端口都需要手动配置代理，可以参考下面的OpenVPN部署。
 
 
 
-# 三、openvpn部署
+# 三、OpenVPN 部署
 
+在刚刚安装了 frpc 客户端的 CentOS 7 服务器上部署 OpenVPN，以实现内网所有主机的一次性内网穿透。
 **注意：建议家里的所有虚拟机都使用桥接模式，NAT模式可能会比较麻烦，暂未测试。**
 
 ## 1、安装 OpenVPN
 
 ```shell
 # 1. 配置 yum 仓库
-curl -O /etc/yum.repos.d/epel.repo https://mirrors.aliyun.com/repo/epel-7.repo
+curl https://mirrors.aliyun.com/repo/epel-7.repo -o /etc/yum.repos.d/epel.repo
 
 yum clean all && yum makecache
 
@@ -279,7 +291,6 @@ script-security 3
 # 用户密码登陆方式验证  
 auth-user-pass-verify /etc/openvpn/server/check.sh via-env
 username-as-common-name         
-
 user  openvpn
 group openvpn
 EOF
@@ -318,19 +329,19 @@ echo "${TIME_STAMP}: Incorrect password: username=\"${username}\", password=\"${
 exit 1
 EOF
 
-# 创建登录 openvpn 账号密码文件
+# 创建登录 OpenVPN 账号密码文件，后续将用该文件中定义的账号密码登录VPN
 cat > /etc/openvpn/server/openvpnfile <<EOF 
 zhangsan ZhangSan666
 lisi LiSi777
 EOF
 
-# 设置执行权限
+# 添加鉴权脚本执行权限
 chmod +x /etc/openvpn/server/check.sh
 
 # 重新配置下权限
 chown -R openvpn:openvpn /etc/openvpn/server
 
-# 重启 openvpn
+# 重启 OpenVPN
 systemctl restart openvpn-server@server 
 systemctl enable openvpn-server@server --now
 ```
@@ -345,7 +356,7 @@ firewall-cmd --add-masquerade
 firewall-cmd --add-port=1194/tcp
 firewall-cmd --runtime-to-permanent
 
-# ------  拓展  ------
+# ------  拓展，以下仅作学习记录，不用操作  ------
 # 删除策略
 firewall-cmd --remove-source=10.60.0.0/24 --permanent
 ```
@@ -353,11 +364,12 @@ firewall-cmd --remove-source=10.60.0.0/24 --permanent
 
 
 ## 6、测试连接
+### 6.1 修改frpc配置文件
+将frpc客户端代理端口（localPort）修改为 OpenVPN 服务的端口
 
 ```shell
 # 1、修改frpc配置文件
-vim frpc.toml
-
+cat > /root/frp/frpc.toml << 'EOF'
 serverAddr = "8.134.xx.xx"     # 需要连接到的公网服务器IP地址
 serverPort = 6060               # 公网服务器上的frp服务端监听的端口号
 auth.token = "mytoken"           # 身份验证令牌，frpc要与frps一致
@@ -367,21 +379,34 @@ auth.token = "mytoken"           # 身份验证令牌，frpc要与frps一致
 name = "openvpn"               # 需要转发到的服务名，可自定义
 type = "tcp"                    # 网络协议
 localIP = "127.0.0.1"           # 需要转发到的ip地址
-localPort = 1194               # 本地服务端口号，这里以openvpn服务的端口为例
+localPort = 1194               # 将该端口设置为本机的OpenVPN服务端口号
 remotePort = 1194              # 访问frp服务端的1194端口时，将转发到localIP的1194端口
+EOF
 
 # 2、重启frpc
 ps -ef | grep frpc | grep -v grep | awk '{print $2}' | xargs kill -9
-nohup ./frpc -c frpc.toml >> logs 2>&1 &
+nohup /root/frp/frpc -c /root/frp/frpc.toml >> /root/frp/logs 2>&1 &
 ```
 
-到阿里云添加安全策略，允许访问1194端口。
+**然后到阿里云添加安全策略，允许访问1194端口。**
 
-**Windows版的openvpn客户端安装步骤可以自行百度，这里就不多写了。**
+### 6.2 测试openvpn连接
 
-创建local.ovpn配置文件，放到你本机的openvpn配置文件目录下，内容如下：
+测试：使用公司工作电脑连接家里的OpenVPN服务器。Windows版的openvpn客户端安装包已放至当前目录下，文件名为 `OpenVPN-2.6.5-I001-amd64.msi` ，请自行安装。
 
-```shell
+安装后，在桌面找到OpenVPN的图标，打开 OpenVPN 的安装位置。
+
+![image-20240706003033626](./assets/image-20240706003033626.png)
+
+
+
+返回上一层目录，然后进入config目录，在该目录下创建名为 `local.ovpn` 的openvpn客户端配置文件，如下图所示。
+
+![image-20240706003619236](./assets/image-20240706003619236.png)
+
+
+以下为 `local.ovpn` 文件内容，对其进行修改并保存。
+```ini
 client
 dev tun
 proto tcp
@@ -389,14 +414,12 @@ proto tcp
 remote 8.134.xx.xx 1194
 resolv-retry infinite 
 nobind
-# ca ca.crt #指定CA证书的文件路径
 verb 3
 persist-key 
 persist-tun
 remote-cert-tls server
 auth-user-pass
-
-# 将之前创建的ca.crt内容粘贴到这里
+# 将之前创建的ca.crt内容粘贴到这里，不要漏掉了<ca>和</ca>
 <ca>
 -----BEGIN CERTIFICATE-----
 MIIDKDCCAhCgAwIBAgIJAJYBiZ7gPlunMA0GCSqGSIb3DQEBCwUAMBIxEDAOBgNV
@@ -418,24 +441,12 @@ YXnPi3dK0ZsJM7LoqeEjPoBWWZCvYGgtjrS3BldvpMS/fkR9EocjiP92y/c=
 </ca>
 ```
 
-将该文件放置于你的openvpn安装目录下，如 D:\Program Files (x86)\OpenVPN\config
-下图中最后的 local 是我自己创建的目录，也可以不创建，就放到 config 下
-
-![image-20240703173848260](./assets/image-20240703173848260.png)
-
-输入之前定义好的账号密码，
-
-zhangsan 
-
-ZhangSan666
-
-测试连接
+双击启动桌面上的 OpenVPN 客户端，输入之前定义好的账号密码，zhangsan/ZhangSan666，点击确定，测试连接。
 
 ![image-20240703174407023](./assets/image-20240703174407023.png)
 
-
-
-连接成功，over ~~
+连接成功，over ~~ 如果连接失败，可以到第四章找找是否有你想要的答案。
+感谢看到这里的朋友，欢迎提问或者提出修改建议！
 
 ![image-20240703174607557](./assets/image-20240703174607557.png)	
 
@@ -443,25 +454,76 @@ ZhangSan666
 
 # 四、问题记录
 
-## 1、连接openvpn成功，但是有几台内网主机连不上？
+## 1、客户端登录OpenVPN成功，但是无法ssh连接OpenVPN服务器以及另外几台内网服务器？
 
 尝试将openvpn服务器的22端口代理到公网，然后重启openvpn服务器的sshd，问题解决。
 
 ```shell
 # 在openvpn服务器上操作
-# 1、再启动一个frpc客户端
-cp -a frp/ frp-1
-cd frp-1/
-./frpc -c frpc.toml >> logs 2>&1 &
+# 1、创建frp目录副本
+cp -a /root/frp/ /root/frp-1
+cd /root/frp-1/
+
+# 2、修改frpc配置文件
+cat > /root/frp-1/frpc.toml << 'EOF'
+serverAddr = "8.134.xx.xx"     # 需要连接到的公网服务器IP地址
+serverPort = 6060               # 公网服务器上的frp服务端监听的端口号
+auth.token = "mytoken"           # 身份验证令牌，frpc要与frps一致
+
+# 代理配置
+[[proxies]]
+name = "test-ssh"               # 需要转发到的服务名，可自定义
+type = "tcp"                    # 网络协议
+localIP = "127.0.0.1"           # 需要转发到的ip地址
+localPort = 22               # 将该端口设置为本机的ssh服务端口号
+remotePort = 6000              # 访问frp服务端的6000端口时，将转发到localIP的22端口
+EOF
+
+# 3、启动frpc副本
+nohup /root/frp-1/frpc -c /root/frp-1/frpc.toml >> /root/frp-1/logs 2>&1 &
 
 # 查看是否启动成功
-ps -ef |grep frp
+ps -ef | grep frp | grep -v grep
 
-# 2、重启sshd，然后测试连接
+# 4、重启sshd，然后测试连接
 systemctl restart sshd
 
-# 3、关闭刚刚启动的frpc客户端，再次测试，发现仍然能连接成功，所以不确定是不是只需要重启sshd即可
-ps -ef | grep frp
-kill -9 <frpc进程id>
+# 5、关闭刚刚启动的frpc副本，再次测试，发现仍然能连接成功，所以不确定是不是只需要重启sshd即可
+ps -ef | grep frp-1 | grep -v grep | awk '{print $2}' | xargs kill -9
 ```
 
+## 2、最后一步测试连接 OpenVPN 服务器失败？
+问题如图：
+
+![openvpn-connect-failed](./assets/openvpn-connect-failed.png)
+
+有些朋友可能之前有安装过OpenVPN，也成功连接过其他地方的OpenVPN。但是每连接一个OpenVPN就需要占用一张虚拟网卡，而安装OpenVPN时默认只会创建一张虚拟网卡，如果想要连接多个OpenVPN，就需要手动创建虚拟网卡。步骤如下：
+(1) 打开OpenVPN安装目录
+
+![image-20240706003033626](./assets/image-20240706003033626.png)
+
+
+
+(2) 在地址栏输入 powershell 并回车
+
+![image-20240706004703620](./assets/image-20240706004703620.png)
+
+
+
+(3) 在打开的powershell中输入以下命令，创建名为 local 的虚拟网卡：
+
+```
+.\tapctl.exe create --name "local" --hwid ovpn-dco
+```
+
+![image-20240706004952836](./assets/image-20240706004952836.png)
+
+```shell
+# 查看虚拟网卡
+.\openvpn.exe --show-adapters
+
+# ----- 拓展，以下命令仅作学习记录，不用执行 -----
+.\tapctl.exe delete --name "网卡名"
+```
+
+最后再次连接OpenVPN即可。
