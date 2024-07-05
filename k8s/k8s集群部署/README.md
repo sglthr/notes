@@ -1,8 +1,5 @@
 # Kubernetes 集群部署入门文档（2023.8）
 
-[TOC]
-
-
 
 # 1. Kubernetes介绍
 
